@@ -1,18 +1,40 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel,Field
 import joblib
 import pandas as pd
+app = FastAPI(
+     title = "Phone class predictor by Raphael Oyoo",
+     description= ("This model predicts phone price range based on specs."
+                  "RAM is the phones active memory used to run apps simultaneously."
+                  "Battery_power is the phones battery capacity."
+                  "px_height and width are the phones screen resolutions"
+                  "The model was trained with an old generation phones datasets which may appear unrealistic in todays time."
+                  "Maximum entries allowed for Ram is 4GB, batery power 2000 Mah, Px_height 1960, px_width 1998 as thats what allowable with the dataset used on the model"
+                   ))
+     
+     
 
-app = FastAPI()
 model = joblib.load('model.pkl')
 scaler = joblib.load('scaler.pkl')
 
 # Only the strongly/weakly correlated features are user-facing
 class PhoneSpecs(BaseModel):
-    ram: int
-    battery_power: int
-    px_height: int
-    px_width: int
+    active_memory_MB: int = Field(
+        ..., ge =256, le= 4000,
+        description= "Ram in megabytes should be between 256 MB to 4000 MB"
+    )
+    battery_capacity_MAH: int= Field(
+        ...,ge= 400, le= 2000,
+        description = "Battery capacity has to be between 400 and 2000 Mah"
+    )
+    height_resolution_pixel: int = Field(
+        ...,ge = 0 ,le = 1960,
+        description = " screen height resolution has to be between 0 and 1960 pixel"
+    )
+    Length_resolution_pixel: int =Field(
+        ..., ge = 400, le = 1998,
+        description = "Width resolution has to be between 400 and 1998 pixel"
+    )
 
 # Defaults for near-zero-correlation features, based on training data medians
 default_values = {
@@ -51,9 +73,16 @@ feature_order = [
 
 @app.post("/predict")
 def phone_price_prediction(specs: PhoneSpecs):
+    #map our input features to model features
+    user_inputs= {
+        "ram":specs.active_memory_MB,
+        "battery_power": specs.battery_capacity_MAH,
+        "px_height": specs.height_resolution_pixel,
+        "px_width":specs.Length_resolution_pixel
+    }
     # Start with the defaults, then overwrite with the user's actual input
     full_row = default_values.copy()
-    full_row.update(specs.model_dump())
+    full_row.update(user_inputs)
 
     # Build the DataFrame in the exact column order the model expects
     input_df = pd.DataFrame([full_row])[feature_order]
