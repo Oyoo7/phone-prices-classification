@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel,Field
 import joblib
 import pandas as pd
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 app = FastAPI(
      title = "Phone class predictor by Raphael Oyoo",
      description= ("This model predicts phone price range based on specs."
@@ -16,6 +18,30 @@ app = FastAPI(
 
 model = joblib.load('model.pkl')
 scaler = joblib.load('scaler.pkl')
+# error handler for input values exceeding our trained data limits
+
+@app.exception_handler(RequestValidationError)
+async def custom_validation_handler(request, exc):
+    field_ranges = {
+        "active_memory_MB": "256 and 4000",
+        "battery_capacity_MAH": "400 and 2000",
+        "height_resolution_pixel": "0 and 1960",
+        "Length_resolution_pixel": "400 and 1998"
+    }
+
+    errors = []
+    for err in exc.errors():
+        field = err["loc"][-1]
+        range_text = field_ranges.get(field, "the allowed range")
+        errors.append(f"{field} must be between {range_text}")
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Invalid input-Please enter a value within the threshhold.",
+            "issues": errors
+        }
+    )
 
 # Only the strongly/weakly correlated features are user-facing
 class PhoneSpecs(BaseModel):
@@ -73,25 +99,45 @@ feature_order = [
 
 @app.post("/predict")
 def phone_price_prediction(specs: PhoneSpecs):
-    #map our input features to model features
-    user_inputs= {
-        "ram":specs.active_memory_MB,
-        "battery_power": specs.battery_capacity_MAH,
-        "px_height": specs.height_resolution_pixel,
-        "px_width":specs.Length_resolution_pixel
-    }
-    # Start with the defaults, then overwrite with the user's actual input
-    full_row = default_values.copy()
-    full_row.update(user_inputs)
+    try:
+        #map our input features to model features
+            user_inputs= {
+                "ram":specs.active_memory_MB,
+                "battery_power": specs.battery_capacity_MAH,
+                "px_height": specs.height_resolution_pixel,
+                "px_width":specs.Length_resolution_pixel
+            }
+            # Start with the defaults, then overwrite with the user's actual input
+            full_row = default_values.copy()
+            full_row.update(user_inputs)
+        
+            # Build the DataFrame in the exact column order the model expects
+            input_df = pd.DataFrame([full_row])[feature_order]
+        
+            scaled_df = scaler.transform(input_df)
+            prediction = model.predict(scaled_df)
+            predicted_class = int(prediction[0])
+        
+            #probability calculation
+            probability  = model.predict_proba(scaled_df)[0]
+            confidence = round(float(probability[predicted_class])* 100,2)
+        
+            return {
+                "price range class": predicted_class,
+                "phone category": price_range_labels[predicted_class],
+                "confidence level of prediction (percentage)": confidence
+            }
+    except Exception as Error:
+         return{
+              "error":"something went wrong while generating your prediction",
+              "details" :str(Error)
+         }
+        
+        
 
-    # Build the DataFrame in the exact column order the model expects
-    input_df = pd.DataFrame([full_row])[feature_order]
 
-    scaled_df = scaler.transform(input_df)
-    prediction = model.predict(scaled_df)
-    predicted_class = int(prediction[0])
-
-    return {
-        "price range class": predicted_class,
-        "phone category": price_range_labels[predicted_class]
-    }
+    
+#api endpoint health check
+@app.get("/health_check")
+def apihealthcheckreport():
+    return{"status":"server healthy"}
