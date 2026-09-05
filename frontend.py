@@ -39,7 +39,7 @@ if st.button("Predict price category"):
     }
     #sending payload and response receipt
 
-    response = requests.post("http://127.0.0.1:8000/predict", json=payload)
+    response = requests.post("https://phone-prices-classification.onrender.com/predict", json=payload)
     if response.status_code  == 200:
       result = response.json()
       st.success(f"predicted category by Oyoo's regression model is : {result['phone category']}")
